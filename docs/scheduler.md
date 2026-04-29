@@ -94,28 +94,33 @@ that don't need human review.
 
 ---
 
-## Built-in Trigger: Chat Summarization
+## Built-in Triggers
 
-The default config ships with one trigger (disabled):
+The default config ships three triggers, all **disabled** out of the box. Enable the ones you want and adjust the cron / project to your needs.
+
+### `manager-heartbeat` — drives the kanban board
+
+**File:** `config/triggers/manager-heartbeat.json`
+
+The manager agent runs on this trigger, surveys the board, evaluates completed worker results, and assigns the next batch of tasks. **This is the trigger that makes autonomous task processing happen.**
+
+The bundled trigger points at the default `General` project — repoint `projectName` to your real project before enabling, otherwise it will spin on an empty board. Default cadence `*/15 * * * *` (every 15 minutes) is a sensible starting point.
+
+See [manager-process.md](manager-process.md) for the full lifecycle.
+
+### `chat-summarize` — distills chat into user memory
 
 **File:** `config/triggers/chat-summarize.json`
 
-```json
-{
-  "name": "Chat Summarization",
-  "agentName": "Personal Agent",
-  "skillName": "chat-summarize",
-  "cronExpression": "0 */2 * * *",
-  "enabled": false
-}
-```
+Every 2 hours, the Personal Agent scans recent chat sessions and stores extracted facts, preferences, and decisions as user memories — so the assistant "remembers" context across sessions.
 
-**What it does:**
-Every 2 hours, the Personal Agent scans recent chat sessions and extracts
-key facts, decisions, and preferences — storing them as user memories.
-This ensures your assistant "remembers" important context across sessions.
+### `project-summary` — daily project status
 
-**To enable it:** Set `"enabled": true` — it will be picked up on the next ConfigSync cycle.
+**File:** `config/triggers/project-summary.json`
+
+Once per workday at 09:00, the Personal Agent posts a short status report for the project (blocked items, items in review, recent progress) via `send_to_user`. Repoint `projectName` to your real project before enabling.
+
+**To enable any trigger:** flip `"enabled": true` (in the JSON or in the **Configuration → Scheduler** UI). It is picked up on the next ConfigSync cycle.
 
 ---
 
@@ -200,7 +205,6 @@ Configured in `config/system-config/system.json`:
 | Key | Default | Description |
 |-----|---------|-------------|
 | `Worker.Scheduler` | `60` | Poll interval in seconds |
-| `Worker.Operator` | `30` | Separate — operator poll interval |
 | `Maintenance.Start` | *(empty)* | Scheduler pauses during maintenance window (empty = disabled) |
 | `Maintenance.End` | *(empty)* | Scheduler resumes after window (empty = disabled) |
 

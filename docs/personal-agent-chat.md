@@ -1,8 +1,9 @@
 # Personal Agent & Chat
 
 The **Personal Agent** is your AI assistant — a persistent, conversational interface for
-brain dumps, research, task creation, and general help. Unlike the operator (which processes
-Kanban tasks autonomously), the personal agent is interactive and responds in real time.
+brain dumps, research, task creation, and general help. Unlike the manager and worker agents
+(which process Kanban tasks autonomously in the background), the personal agent is interactive
+and responds in real time.
 
 ---
 
@@ -85,12 +86,15 @@ The personal agent has access to these capability groups:
 
 | Capability | Key tools |
 |------------|----------|
-| `base-tools` | `get_current_datetime`, `get_system_info` |
 | `admin` | `list_agents`, `get_agent`, `list_servers`, `get_server`, `list_configs`, `update_config` |
 | `task-management` | `list_projects`, `get_project`, `list_tasks`, `get_task`, `create_task`, `update_task` |
-| `memory` | `remember`, `recall`, `search_memory`, `forget`, `remember_project`, `recall_project`, `search_project_memory`, `forget_project` |
+| `memory` | `remember`, `recall`, `forget`, `remember_project`, `recall_project`, `forget_project` |
 | `chat` | `list_sessions`, `get_session_messages`, `search_sessions` |
-| `chat_write` | `create_session`, `send_message`, `send_to_user` |
+| `chat_write` | `send_message`, `send_to_user` |
+| `skills` | `list_skills`, `read_skill` |
+| `identity` | `get_identity` |
+| `file-operations` | `read_file`, `write_file`, `list_directory`, `search_files`, `replace_in_file`, … |
+| `shell-operations` | `execute_shell_command` |
 
 ### Task Delegation
 
@@ -101,10 +105,10 @@ The personal agent acts as your **interface to the system**, not the worker itse
 The agent will:
 1. Gather requirements from you
 2. Create a structured task on the Kanban board with full context
-3. The operator picks it up and works on it autonomously
-4. The agent follows up and reports back when it's in Review
+3. On the next manager heartbeat, the manager assigns it to a worker agent — which executes it autonomously
+4. The personal agent follows up and reports back when it's in Review
 
-This is the **assistant flow**: brain dump → structured task → operator execution.
+This is the **assistant flow**: brain dump → structured task → manager + worker execution.
 
 ---
 
@@ -119,7 +123,7 @@ The personal agent's persona is fully defined in config files — no code change
   "name": "Personal Agent",
   "role": "personal",
   "description": "Brain dump intake, intent extraction, general help and research",
-  "capabilities": ["base-tools", "admin", "task-management", "memory", "chat", "chat_write"],
+  "capabilities": ["admin", "task-management", "memory", "chat", "chat_write", "skills", "identity", "file-operations", "shell-operations"],
   "model": "qwen2.5:14b",
   "supportsFunctionCalling": true
 }
@@ -146,7 +150,7 @@ The personal agent has its own workspace directory at `AiConfig__BaseDir/workspa
 This is used for file operations during chat — writing drafts, saving research, or preparing
 content before creating tasks.
 
-Unlike the operator (which creates a workspace per task), the personal agent uses a single
+Unlike workers (which get a fresh workspace per task), the personal agent uses a single
 persistent workspace shared across all sessions.
 
 ---
@@ -154,7 +158,7 @@ persistent workspace shared across all sessions.
 ## Proactive Messaging
 
 The personal agent is the **only** agent that communicates with you via chat.
-No other agent (operator, scheduler, etc.) sends messages directly.
+No other agent (manager, workers, scheduled triggers) sends messages directly.
 
 When a task completes or needs attention, the personal agent picks it up and
 notifies you in an existing or new session. The web UI shows an unread badge
@@ -169,11 +173,11 @@ for new incoming messages.
 The `chat-summarize` skill runs on a schedule (default: every 2 hours, disabled by default)
 to convert recent conversations into permanent memories.
 
-### Task Watch & Report
+### Project Summary
 
-The `task-watch` skill runs on a schedule to check for tasks that need your attention —
-completed tasks, blocked tasks, or tasks in review. When it finds something, the personal
-agent sends you a chat message with a summary.
+The `project-summary` skill runs on a schedule (default: weekdays at 09:00, disabled by default)
+to post a short status report for the project — blocked items, items in review, recent progress —
+via `send_to_user`. Repoint `projectName` to your real project before enabling.
 
 → See [scheduler.md](scheduler.md) for how to enable and configure scheduled triggers.
 

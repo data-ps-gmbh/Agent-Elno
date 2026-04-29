@@ -3,7 +3,7 @@
 ![Dashboard](img/dashboard.png)
 
 > A self-hosted AI agent platform that turns a kanban board into an autonomous development team.
-> Describe tasks, the operator picks them up, writes code, and delivers results for your review —
+> Describe tasks, the manager picks them up, writes code, and delivers results for your review —
 > all on your own hardware, with your own models, and zero data leaving your server.
 > Free for personal use.
 
@@ -13,12 +13,13 @@
 
 ![Kanban](img/kanban.png)
 
-- **Kanban-driven agents** — create tasks, the operator picks them up and works autonomously
+- **Kanban-driven agents** — create tasks, the manager picks them up and works autonomously
 - **Human-in-the-loop** — every result lands in a review column before it's accepted
 - **Assistant / brain-dump chat** — describe an idea in plain language, the system creates structured tasks
 - **Scheduled triggers** — cron-based agent execution without manual intervention
 - **VS Code integration** — MCP server exposes tasks and review directly in your editor
-- **Bring your own model** — connect any OpenAI-compatible endpoint (LocalAi, LiteLLM, …) or OpenAI directly
+- **Bring your own model** — connect any OpenAI-compatible endpoint (LocalAi, LiteLLM, …), OpenAI / Azure, or the Anthropic API directly
+- **Claude Code CLI bridge** — on a personal install, route agents through your local `claude` CLI for free with your existing Claude subscription *(personal machine only — see caveat below)*
 - **100 % self-hosted** — your data never leaves your machine
 - **0 % telemetry** — no tracking, no analytics, no data collection ... at least not in our code 😄
 
@@ -32,6 +33,9 @@ curl -fsSL https://raw.githubusercontent.com/data-ps-gmbh/Agent-Elno/main/get-ag
 
 The interactive installer asks for your LLM provider, model name, and ports — then starts everything.
 Same command to update. Default login: **admin / password**.
+
+> **Already know your config?** Skip the wizard with the **[non-interactive install template](docs/quickstart.md#non-interactive-install-env-var-driven)** —
+> a pre-fillable script you can also drop into cron for nightly auto-updates.
 
 → **[Full installation guide](docs/quickstart.md)**
 
@@ -47,23 +51,28 @@ Removes all services, binaries, config, and data. Asks for confirmation before d
 
 ## 🔄 How It Works
 
-1. **Open your project in VS Code** — Copilot connects to the agent via MCP
-2. **Define tasks with Copilot** — describe what needs to be done, Copilot hands the task into the system
-3. **Repeat** — queue up everything that needs doing
-4. **The operator works autonomously** — picks up tasks, writes code, creates feature branches
-5. **Check out the feature branch** for review — rebase to latest if needed
-6. **Review the result** — approve, or add comments requesting changes
-7. **Tell the operator to merge** via comment and remove the review tag to let it continue
+You can feed work into the system from three places — pick whichever fits your moment:
+
+- **Web kanban board** — open the board, add a task with a title and description.
+- **Assistant chat** — brain-dump an idea in plain language; the personal agent extracts intent and creates a structured task for you.
+- **VS Code / Copilot via MCP** — describe the work in your editor; Copilot hands it into the system.
+
+Once tasks are on the board, the autonomous loop takes over:
+
+1. The **manager** runs on a cron heartbeat — surveys the board, assigns each eligible task to the right worker agent (developer, senior-developer, reviewer, architect, …).
+2. The **worker** wakes up immediately, checks out the project's feature branch, writes code, runs tests, commits.
+3. When the worker is done, the **manager** evaluates the result on its next heartbeat — moves trivial work to *Done*, escalates substantive work to *Review*.
+4. **You review** — approve via comment, or request changes in a comment and remove the `review` tag; the manager picks it up again on the next heartbeat.
 
 ### Kanban Processing Rules
 
-The operator picks up tasks based on column and tags:
+The manager picks up tasks based on column and tags:
 
 - **Processed:** Any column except *Backlog* and *Done*, without the tags *blocked* or *review*
 - **Skipped:** Tasks in *Backlog*, *Done*, or tagged *blocked* / *review*
 
-Move a task to **Ready** (or any active column) to let the operator pick it up.
-When the operator finishes, it tags or moves the task to *review* or *done* — you check the result and either approve or comment.
+Move a task to **Ready** (or any active column) to let the manager pick it up.
+When the manager finishes, it tags or moves the task to *review* or *done* — you check the result and either approve or comment.
 
 **Away from VS Code?** Use the chat to tell your personal agent things on the go — via the web UI or the mobile app *(currently in closed beta)*.
 
@@ -71,75 +80,61 @@ When the operator finishes, it tags or moves the task to *review* or *done* — 
 
 ## 🤖 Model Recommendations
 
-We run a hybrid setup: a local Qwen model for orchestration and chat, OpenAI Foundry models for coding and review (bound directly or via [LiteLLM](https://litellm.ai) as a unified proxy).
-
-> **This is our budget setup** — optimized for cost, not peak performance.
-> Bigger models (Claude, GPT-4.5, o3) handle larger projects and produce smarter results.
-> The table below is a starting point, not a ceiling.
-
 > **The model is everything.**
 > Agent-Elno is an orchestration layer — it sets the stage, but the model does the actual thinking.
-> A weak model will produce weak results, no matter how well the system is configured.
-> A capable model will surprise you. Choose wisely, and the agent becomes genuinely useful;
-> choose poorly, and you'll spend more time cleaning up than you saved.
+> A capable model will surprise you. A weak one will burn through your tokens producing slop.
+> Pick the model first, configure the platform second.
 
-### Current Setup
+> **Running on your own dev machine?** You can wire up the **Claude Code CLI** as an LLM
+> backend — the platform spawns the local `claude` binary and piggybacks on your existing
+> Claude subscription. No API key, no per-token bill on top of what you already pay.
+> *Caveat:* per Anthropic's TOS the subscription-tied CLI login is **only legal on your own
+> developer machine** — not on a shared or production server. For server installs, use the
+> Anthropic API server type with an API key. See [docs/claude-setup.md](docs/claude-setup.md).
 
-| Role | Model | Local/Cloud | Why |
-|------|-------|-------------|-----|
-| **Operator** (task orchestration) | Qwen3-32B-Q4_K_M | Local | Better instruction following than Qwen2.5, reliable function calling, free |
-| **Personal Agent** (chat) | Qwen3-32B-Q4_K_M | Local | Great personality, fast responses, keeps data private |
-| **Document Editor** | Qwen3-32B-Q4_K_M | Local | Solid markdown and prose generation |
-| **Developer** (coding) | gpt-5.1-codex-mini | Cloud (OpenAI) | Great quality-to-cost ratio for large projects |
-| **Senior Developer** (complex coding) | gpt-5.1-codex-max | Cloud (OpenAI) | Large context window, handles multi-file changes well |
-| **Architect** (design/planning) | o4-mini | Cloud (OpenAI) | Strong reasoning, good at structural decisions |
-| **Reviewer** (code review) | o4-mini | Cloud (OpenAI) | Thorough review, follows coding guidelines |
-| **Embedding** | nomic-embed-text-v1.5 | Local (LocalAI) | 768-dim, fast, good semantic search quality |
+### What we run today
 
-### What We Tried
+This is the live setup at DATA-PS — it changes as new models ship, so treat it as a snapshot,
+not a fixed recipe.
 
-| Model | Role tested | Verdict | Notes |
-|-------|-------------|---------|-------|
-| Qwen3-8B | Agent / Operator | ❌ | Bad instruction following |
-| Phi-4-Mini-Reasoning | Agent / Operator | ❌ | Hallucinations |
-| Phi-4-Mini-Instruct | Agent / Operator | ❌ | Bad function calling |
-| Qwen2.5-Coder-32B-Instruct | Coder | ❌ | Poor understanding of large codebases |
-| Qwen2.5-Coder-14B-Instruct | Coder | ⚠️ | OK for small projects, not for bigger solutions |
-| Qwen3-Coder-30B-A3B | Coder | ❌ | Very fast, very unreliable output |
-| Qwen3-Coder-Next | Coder | ❌ | Tends to review instead of code, even with explicit instructions |
-| NousResearch Hermes-4-14B | Agent / Operator | ⚠️ | Great personality, OK instruction following, bad as operator |
-| Microsoft NextCoder-32B | Coder | ⚠️ | Ignores guidelines, OK for smaller projects only |
-| DeepSeek-V3.2 | Coder | ⚠️ | Decent output, problematic function calling behavior |
-| GPT-4o | Coder | ⚠️ | Decent, replaced by gpt-4.1 |
-| GPT-4.1 | Coder | ✅ | Good context understanding, reliable output — replaced by codex-mini for cost |
-| GPT-4.1-Nano | Agent / Operator | ⚠️ | Decent reasoning for a small model |
-| Qwen2.5-32B-Instruct | Agent / Operator / Chat | ⚠️ | Good instruction following, great personality — but loops on tool calls under load |
-| Qwen3-32B (Q8) | Agent / Operator | ⚠️ | Similar looping issues as Qwen2.5, needs R/W/E guard |
+| Use case | Model | Why |
+|---|---|---|
+| **Coding** (default developer) | **Claude Sonnet 4.6** | Best size / quality / cost balance for code; reliable tool calling |
+| **Heavy lifting** (architect, reviewer, multi-file refactors) | **Claude Opus 4.7** | Strongest reasoning, huge context; catches what coder models miss |
+| **Manager + personal assistant** (orchestration & chat) | **Qwen3.6-27B** (local) | Reliable tool calling, surprisingly good at code/architecture for triage and "simple-change" reviews, great secretary persona, free, private |
+| **Specific cloud coder tasks** | **gpt-5.1** (codex variants) | Where we route the work that doesn't go to Claude — large context, fast |
+| **Embedding** | **nomic-embed-text-v1.5** (local) | 768-dim, fast, good semantic search quality |
 
-### Recommendations
+We bind these directly or front them with [LiteLLM](https://litellm.ai) as a unified proxy.
 
-**For coding tasks:**
-- **gpt-5.1-codex-max** (cloud) — very big context for massive coding tasks, redesign or rewrites
-- **gpt-5.1-codex-mini** (cloud) — best value: high quality, large context, low cost
-- **gpt-4.1** (cloud) — reliable fallback with good context understanding
-- Local models struggled with our production codebases (50k–100k lines of C# and 20k–40k lines of Razor per project)
+### Lessons we paid for so you don't have to
 
-**For orchestration / chat:**
-- **Qwen3-32B-Q4_K_M** (local) — our pick: better instruction following than Qwen2.5, great personality, zero cost
-- Qwen2.5-32B-Instruct still works but tends to loop on tool calls under load
-- Smaller models (8B–14B) were unreliable for function calling
+These are the *durable* takeaways — model names will rot, but the patterns hold.
 
-**For review / architecture:**
-- **o4-mini** (cloud) — strong reasoning, follows guidelines well
+- **Below ~30B params is too small for orchestration.** Anything in the 8B–14B range loops on
+  tool calls under load (Qwen3-8B, Phi-4-Mini variants, Hermes-4-14B, GPT-4.1-Nano). 27–32B is
+  the floor for a reliable manager / personal agent.
+- **Local coder models choke on real codebases.** We ran our production repos (50k–100k LOC C#,
+  20k–40k LOC Razor) past every flavour of Qwen-Coder, NextCoder, DeepSeek-V3.2 — all of them
+  either ignored conventions, hallucinated paths, or "reviewed instead of coded." The working
+  pattern is **local manager + cloud (or Claude CLI) coder**, not local everything.
+- **Reasoning models for review pay for themselves.** Whatever the current frontier reasoning
+  model is (today: Opus 4.7 / o-series), it catches what coder-tier models miss. Not a place
+  to economise.
+- **Tool-call quality matters more than benchmark scores.** We've watched models with great
+  HumanEval numbers loop endlessly because they couldn't pick the right tool. Test in-platform,
+  not on leaderboards.
 
-**For embeddings:**
-- **nomic-embed-text** — fast, runs locally, good semantic search quality
+### Local vs Cloud vs Claude CLI
 
-### Local vs Cloud
-
-- **Local (LocalAI / Ollama):** Free, private, no rate limits — but needs GPU for acceptable speed (32B needs ~24 GB VRAM)
-- **Cloud (OpenAI / Azure):** Faster, smarter coding models — but costs money and data leaves your server
-- **Hybrid (LiteLLM):** Route orchestration locally, coding to cloud — best of both worlds
+- **Local** (LocalAI / Ollama): free, private, no rate limits — but needs a GPU (a 27–32B model
+  wants ~24 GB VRAM at Q4).
+- **Cloud API** (OpenAI / Azure / Anthropic API): faster, smarter coding models — costs money
+  and data leaves your server, but it's the only legal Claude path on a shared host.
+- **Claude CLI** (personal machine only): free if you already have a Claude subscription;
+  see the legal caveat above.
+- **Hybrid via LiteLLM**: route orchestration locally, coding to cloud or Claude — what we
+  do day-to-day.
 
 ---
 ## 📖 Documentation
@@ -149,11 +144,12 @@ We run a hybrid setup: a local Qwen model for orchestration and chat, OpenAI Fou
 | **[Quick Start](docs/quickstart.md)** | Installation and first steps |
 | **[Configuration](docs/configuration.md)** | Environment files, config modes, all options |
 | **[Architecture](docs/architecture.md)** | Service architecture and data flow |
-| **[Operator Process](docs/operator-process.md)** | How the autonomous loop works |
+| **[Manager Process](docs/manager-process.md)** | How the autonomous loop works |
 | **[Agents & Skills](docs/agents-and-skills.md)** | Agent definitions and prompt templates |
 | **[Chat & Memory](docs/personal-agent-chat.md)** | Personal agent, sessions, semantic memory |
 | **[Scheduler](docs/scheduler.md)** | Cron-based triggers |
-| **[Integrations](docs/integrations.md)** | LiteLLM, Ollama, OpenAI, nginx, Traefik |
+| **[Integrations](docs/integrations.md)** | LiteLLM, Ollama, OpenAI, Anthropic, Claude CLI, nginx, Traefik |
+| **[Claude Code CLI Setup](docs/claude-setup.md)** | Personal-machine route to Claude (subscription, no API key) |
 | **[Troubleshooting](docs/troubleshooting.md)** | Logs, action log, common issues |
 | **[Changelog](docs/changelog.md)** | Release history |
 

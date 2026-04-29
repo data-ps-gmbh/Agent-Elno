@@ -64,15 +64,15 @@ AiConfig__Sdk__Password=password
 
 JSON arrays loaded into the database at startup. Each entry is a `category/group/key` triple.
 
-### `system.json` — Operator & Workers
+### `system.json` — Workers & Maintenance
+
+The manager is a scheduled agent (the `manager-heartbeat` trigger), not a hard-coded worker —
+its cadence is the cron expression on its trigger, not a system-config key. The keys below cover
+the actual hosted workers and platform-level windows.
 
 | Group | Key | Default | Description |
 |-------|-----|---------|-------------|
-| Operator | `MaxSessionTurns` | `10` | Max LLM loop iterations per task |
-| Operator | `IgnoredStates` | `Backlog,Done` | Kanban states the operator skips |
-| Operator | `IgnoredTags` | `blocked,review` | Task tags the operator skips |
-| Worker | `Operator` | `30` | Operator poll interval (seconds) |
-| Worker | `Scheduler` | `60` | Trigger evaluation interval (seconds) |
+| Worker | `Scheduler` | `60` | Cron trigger evaluation interval (seconds) |
 | Worker | `DatabaseCleanup` | `900` | DB cleanup interval (seconds) |
 | Worker | `WorkspaceCleanup` | `21600` | Workspace cleanup interval (seconds) |
 | Worker | `MetricsCleanup` | `21600` | Metrics cleanup interval (seconds) |
@@ -133,7 +133,8 @@ Each JSON file in this folder defines one LLM server endpoint.
 |------|---------|-----------|
 | `Generic` | LiteLLM, Ollama, vLLM, any OpenAI-compatible API | Appends `/v1` to `baseUrl` if missing. Uses standard OpenAI client. |
 | `OpenAI` | Azure OpenAI / Azure AI Foundry | Uses the Azure OpenAI client with `apiVersion`. The model name is sent as the **deployment name**. |
-| `Anthropic` | *(reserved)* | Not yet implemented. |
+| `Anthropic` | Anthropic API (cloud) | HTTP calls to `api.anthropic.com` using the `apiKey`. Use this on a server — it is the only legal Claude path for shared/production hosts. |
+| `ClaudeCli` | Local Claude Code CLI | Spawns the `claude` CLI per execution. No `baseUrl` or `apiKey` — authentication piggybacks on the CLI's own login. **Requires the `claude` binary to be installed on the host and logged in as the service user**, and per Anthropic's TOS the subscription-tied login is only permitted on your own developer machine, not on a shared/production server. See [integrations.md](integrations.md#claude-code-cli) for setup. Set `supportedModels` to the versioned model IDs you want to route (e.g. `claude-opus-4-7`, `claude-sonnet-4-6`). |
 
 **Azure AI Foundry example:**
 
@@ -195,7 +196,7 @@ Each sub-folder contains a `project.json` and an optional `project_info.md` with
   "kanbanColumns": ["Backlog", "Ready", "InProgress", "Review", "Done"],
   "repositories": ["My App"],
   "parameters": {
-    "default-branch": "main"
+    "boardColor": "#3f51b5"
   }
 }
 ```
@@ -205,13 +206,13 @@ Each sub-folder contains a `project.json` and an optional `project_info.md` with
 | `name` | Display name |
 | `description` | What this project is about |
 | `kanbanColumns` | Ordered list of Kanban board columns |
-| `repositories` | List of repository **names** (must match `name` in `repositories/`) |
-| `parameters` | Key-value pairs passed to the agent as context |
+| `repositories` | List of repository **names** (must match `name` in `repositories/`); the workspace branch comes from the repository's `defaultBranch` field |
+| `parameters` | Free-form key-value pairs passed to the agent as context. Reserved keys: `boardColor` (hex board accent). |
 
 ### Project Prompt (`project_info.md`)
 
 Place a `project_info.md` file next to `project.json` to give agents project-specific context.
-This content is injected into every operator step prompt as a **## Project Context** section.
+This content is injected into every manager step prompt as a **## Project Context** section.
 
 Use it to tell agents:
 - Where the code lives and which commands to run

@@ -25,14 +25,15 @@ App and MCP communicate exclusively through the API — they never touch SQLite 
           ┌──────────────────────────────┐
           │       API  (port 5100)       │
           │    ASP.NET Core — JWT Auth   │
-          │  REST · Operator · Scheduler │
+          │  REST · WorkerHub · Scheduler│
           │  SignalR · Semantic Kernel   │
           │          SQLite              │
-          └──────────────┬───────────────┘
-                         │ OpenAI API
-                         ▼
-                   LLM Provider
-                 (Generic / OpenAi)
+          └──────┬─────────────────┬─────┘
+                 │ HTTP            │ spawn
+                 ▼                 ▼
+          OpenAI-compatible    `claude` CLI
+          (Generic / OpenAI    (ClaudeCli —
+           / Anthropic)         local process)
 ```
 
 ---
@@ -45,10 +46,10 @@ The central service. Everything else talks to it.
 
 - **REST API** — CRUD for projects, tasks, agents, skills, config, users
 - **JWT authentication** — HS256, 1h access token + 7d refresh token
-- **Operator worker** — background loop that picks and executes tasks
-- **Scheduler worker** — evaluates cron triggers, runs agent + skill, logs result
+- **Worker hub** — event-driven: a worker wakes up the moment the manager calls `assign_task`; no polling loop
+- **Scheduler worker** — evaluates cron triggers (incl. the **manager heartbeat**), runs agent + skill, logs result
 - **SignalR hub** — real-time updates for chat and task status
-- **Semantic Kernel** — orchestrates LLM calls, function calling, embeddings
+- **LLM execution layer** — two-pillar provider routing: Semantic Kernel (HTTP-based: Generic / OpenAI / Anthropic) or Claude Code CLI (local `claude` process). See `Services/Worker/ProviderFactory.cs`.
 - **Config loader** — reads `config/` from disk (or git) at startup and on sync interval
 
 ### App (`DataPS.AI.App`)
@@ -73,28 +74,39 @@ VS Code integration via the Model Context Protocol.
 
 ## Data Flow — Task Execution
 
+The manager is a **scheduled agent** that fires on its cron trigger, surveys the board, and assigns tasks
+to worker agents. Workers wake up immediately on assignment — there is no operator polling loop.
+
 ```
-User creates task
+User creates task → API stores in SQLite (Ready / Backlog)
+      │
+      ▼  (manager heartbeat fires on cron — manager-heartbeat trigger)
+Manager: get_manager_tasks → for each eligible task:
+      │
+      ├─ Ready, unassigned          → assign_task(role)        ─┐
+      ├─ InProgress + "Completed:"  → review or assign push    │
+      ├─ InProgress + "Failed:"     → reassign or tag blocked  │
+      └─ Returning from human       → act on feedback          │
+                                                               │
+      ▼ (event-driven wakeup the moment assign_task is called) │
+Worker: receives agent-wakeup skill → reads task → executes ◄──┘
+      │
+      ├─ LLM call via ProviderFactory (SK plugins OR Claude CLI)
+      ├─ tools: file / shell / git / task-mgmt / memory / …
+      └─ commits + pushes at meaningful milestones
       │
       ▼
-API: task stored in SQLite (state = Todo)
+Worker calls complete_task or fail_task → task back to manager
       │
-      ▼  (every 30s)
-Operator worker picks task
-      │
-      ├─ DetermineRole   → select agent
-      ├─ PlanStep        → decide next action
-      ├─ ComposePrompt   → build LLM prompt
-      ├─ LLM call        → Semantic Kernel + tools
-      ├─ EvaluateResult  → done / continue / error
-      └─ SummarizeStep   → append to task log
-      │
-      ▼ (when done or turn limit hit)
-SummarizeTask → task moved to Review
+      ▼ (next manager heartbeat)
+Manager evaluates → state Review (+ tag review) or Done
       │
       ▼
-User reviews result → Approve (Done) or Reject (Todo)
+Human reviews → comment + remove review tag → manager picks back up
 ```
+
+The manager never executes work itself; workers never set lifecycle state themselves.
+See [manager-process.md](manager-process.md) for the full lifecycle and tag semantics.
 
 ---
 
@@ -134,7 +146,7 @@ Changes do not require a service restart except for `.env` changes.
 
 ## Security Model
 
-- All API endpoints require a valid JWT except `/auth/login` and `/health`
+- All API endpoints require a valid JWT except `/api/auth/login` and `/health`
 - The App authenticates users via login (JWT)
 - The MCP server authenticates with a service account (`AiConfig__Sdk__*`)
 - LLM provider config (including API keys) is defined in `config/servers/` and synced to the database by ConfigSync

@@ -60,6 +60,60 @@ After confirming, the installer will:
 
 ---
 
+## Non-Interactive Install (env-var driven)
+
+If you'd rather pin all config upfront — for repeatable provisioning, scripted deployments,
+or nightly auto-updates — skip the wizard and drive `install.sh` with `INSTALL_*` environment
+variables.
+
+The easiest way is the template script, which embeds the env block at the top and then
+downloads + runs the latest release:
+
+```bash
+curl -fsSL -O https://raw.githubusercontent.com/data-ps-gmbh/Agent-Elno/main/customize-agent-elno.sh
+nano customize-agent-elno.sh   # edit the CONFIG block at the top
+sudo bash customize-agent-elno.sh
+```
+
+### Recognized variables
+
+All variables are read by `install.sh` on a fresh install. On an update, the script auto-detects
+the existing installation and ignores the wizard and these variables entirely — see
+[Updating](#updating) below.
+
+| Variable | Required | Default | Used for |
+|---|---|---|---|
+| `INSTALL_API_PORT` | optional | `5100` | API port |
+| `INSTALL_APP_PORT` | optional | `5200` | App / web UI port |
+| `INSTALL_MCP` | optional | `n` | `y` to install the standalone MCP server |
+| `INSTALL_MCP_PORT` | optional | `5300` | MCP port (only if `INSTALL_MCP=y`) |
+| `INSTALL_SERVER_NAME` | optional | `LLM Server` | Display name for the LLM server in the UI |
+| `INSTALL_SERVER_URL` | **required** | — | Base URL of your LLM API |
+| `INSTALL_SERVER_API_KEY` | optional | empty | API key (leave empty for local instances without auth) |
+| `INSTALL_MODEL_DEFAULT` | **required** | — | Default model ID to route to |
+| `INSTALL_MODEL_EMBEDDING` | optional | empty | Embedding model (empty = no semantic memory search) |
+| `INSTALL_PUBLIC_URL_API` | optional | `http://<host-ip>:<api-port>` | Public API URL (mobile, QR) |
+| `INSTALL_PUBLIC_URL_APP` | optional | `http://<host-ip>:<app-port>` | Public App URL |
+| `INSTALL_CONFIG_MODE` | optional | `i` | `i` import-once / `f` file-watch / `g` git-sync |
+| `INSTALL_CONFIG_REPO_URL` | required if mode `g` | — | Git repo to sync config from |
+
+### Re-using the same script for updates
+
+The same `customize-agent-elno.sh` works for updates: re-run it and `install.sh` detects the
+existing install at `/opt/dataps-ai/`, skips the wizard, and just replaces the binaries
+(config and data are preserved). The `INSTALL_*` block has no effect on the update path, so
+you can leave it as-is.
+
+This makes it trivial to drop the script into cron for **nightly auto-updates**:
+
+```cron
+0 4 * * * /usr/local/bin/customize-agent-elno.sh >> /var/log/agent-elno-update.log 2>&1
+```
+
+We run exactly this on our test box to stay on the latest build with zero touch.
+
+---
+
 ## Step 2 — Verify the Services
 
 ```bash
@@ -133,8 +187,15 @@ Navigate to `http://<your-server>:5200` in your browser.
 4. Open the **Board** in the Web UI
 5. Click **+ New Task** — give it a title and description
 6. Move the Task to Ready
-7. The operator picks it up within 30 seconds — watch it move through *In Progress* → *Review*
-8. In the *Review* column, approve or reject the result
+7. **Wire up the manager heartbeat** for this project (see below) — without it, nothing picks up tasks
+8. Once the heartbeat fires, watch the task move through *InProgress* → *Review*
+9. In the *Review* column, approve or reject the result
+
+> **The bundled `manager-heartbeat` trigger is disabled and points at the empty `General` project** —
+> that's intentional, an empty heartbeat would just spin on nothing.
+> Before you enable it, edit `config/triggers/manager-heartbeat.json` (or use the **Configuration → Scheduler** page)
+> and change `projectName` to your real project. Then flip `enabled: true` and pick a cadence
+> (the default `*/15 * * * *` is a reasonable starting point).
 
     
     
@@ -167,15 +228,19 @@ Your data and config in `/opt/dataps-ai/data/` and `/opt/dataps-ai/config/` are 
 
 ## Connecting VS Code
 
-The MCP server at port 5300 is an auth proxy — no credentials needed.
+The standalone MCP server at port 5300 is an auth proxy — no credentials needed in the client.
+It is a separate service (`DataPS.AI.MCP`) that sits in front of the API, not to be confused with the
+internal `/mcp/agent` endpoint embedded in the API itself (which is JWT-protected and used by platform-spawned
+CLI workers, not by external editors).
+
 Add a `.vscode/mcp.json` to your project:
 
 ```json
 {
   "servers": {
     "dataps-ai": {
-      "type": "sse",
-      "url": "http://<your-server>:5300/sse"
+      "type": "http",
+      "url": "http://<your-server>:5300"
     }
   }
 }
@@ -187,6 +252,6 @@ Copilot and other MCP-aware extensions will pick it up automatically.
 
 ## Next Steps
 
-- [Configuration reference](configuration.md) — tune the operator, add LLM servers, set up projects
-- [Operator process](operator-process.md) — understand how the autonomous loop works
+- [Configuration reference](configuration.md) — tune intervals, add LLM servers, set up projects
+- [Manager process](manager-process.md) — understand how the autonomous loop works
 - [Agents & Skills](agents-and-skills.md) — customize agent behavior and prompt templates

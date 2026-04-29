@@ -28,7 +28,7 @@ and an optional personality prompt file.
 |-------|-------------|
 | `name` | Display name shown in the web UI |
 | `role` | Internal identifier (used in project config and task routing) |
-| `description` | What this agent is good at (shown in UI, used by operator for role selection) |
+| `description` | What this agent is good at (shown in UI, used by manager for role selection) |
 | `capabilities` | Array of allowed capability groups; controls which tools are available |
 | `model` | LLM model name for this agent |
 | `supportsFunctionCalling` | Whether the model supports tool use |
@@ -39,7 +39,7 @@ The default config ships with these agents:
 
 | Agent | Purpose |
 |-------|---------|
-| `operator` | Internal — drives the execution loop (do not assign to projects) |
+| `manager` | Internal — drives the execution loop (do not assign to projects) |
 | `developer` | General software development tasks |
 | `senior-developer` | Same as developer, higher-quality prompts, slower/costlier model |
 | `architect` | System design, documentation, ADRs |
@@ -81,68 +81,67 @@ When writing code:
 
 ## Skills
 
-Skills are **reusable prompt templates** used by the operator loop and by scheduled triggers.
+Skills are **reusable prompt templates** used by the manager loop and by scheduled triggers.
 They live in `config/skills/` as Markdown files.
 
-### Built-in Operator Skills
+### Built-in Skills
 
-| Skill file | Configured by | Purpose |
-|------------|--------------|---------|
-| `operator-determine-role.md` | `SkillDetermineRole` | Decide which agent handles the current task |
-| `operator-plan-step.md` | `SkillPlanStep` | Plan the next action given current state |
-| `operator-compose-prompt.md` | `SkillComposeStepPrompt` | Build the final prompt for the LLM call |
-| `operator-evaluate-result.md` | `SkillEvaluateResult` | Decide: done, continue, or error? |
-| `operator-summarize-step.md` | `SkillSummarizeStep` | Summarize one completed step for the log |
-| `operator-summarize-task.md` | `SkillSummarizeTask` | Write the final review summary |
+The default config ships five skills:
 
-### Built-in Scheduler Skills
+| Skill file | Used by | Purpose |
+|------------|---------|---------|
+| `manager-heartbeat.md` | `manager-heartbeat` trigger → Manager Agent | Survey the board, assign workers, evaluate completed work, drive state transitions |
+| `manager-wakeup.md` | TaskWakeup → Manager Agent | Sent to the manager when a worker hands a task back via `complete_task` / `fail_task`; triggers evaluation |
+| `agent-wakeup.md` | TaskWakeup → assigned worker | Sent to the worker the moment the manager calls `assign_task`; orients it and instructs autonomous execution |
+| `chat-summarize.md` | `chat-summarize` trigger → Personal Agent | Distill recent chat sessions into persistent user memories |
+| `project-summary.md` | `project-summary` trigger → Personal Agent | Post a short kanban status report for the project via `send_to_user` |
 
-| Skill file | Purpose |
-|------------|---------|
-| `chat-summarize.md` | Summarize recent chat sessions into persistent user memories |
+The first three are part of the task lifecycle and are referenced by code paths (TaskWakeup + manager heartbeat skill name). The last two are example scheduled skills you can keep, edit, or replace freely.
 
 ### Customizing Skills
 
 Edit the Markdown files directly. The skill content is sent as a prompt to the LLM.
 
-**Operator skills** receive template variables that are substituted at runtime.
-**Scheduler skills** also receive template variables — see the table below.
+**All prompt text** — system prompts, personality prompts, skills, and project info — receives
+placeholder substitution before being sent to the LLM. Resolution happens in every execution path:
+workers (CLI + SK) resolve before sending to the LLM, and `read_skill` (MCP + SK plugin) resolves
+before returning content to the agent.
 
-### Operator Template Variables
+### Placeholder Reference
 
-All operator skills receive these **common variables**:
+Values come from `PromptContext` — well-known fields are mapped directly,
+additional values come from `context.Parameters` (set by the caller).
+
+#### Well-known fields (always available)
 
 | Variable | Content |
 |----------|---------|
-| `{TaskName}` | Task title |
-| `{TaskDescription}` | Task description (or `(no description)`) |
-| `{TaskState}` | Current Kanban column |
-| `{TaskTags}` | Comma-separated tag list |
-| `{TaskComments}` | Formatted user and agent comments with timestamps |
-
-Individual skills receive **additional variables**:
-
-| Skill | Extra variables |
-|-------|----------------|
-| `operator-determine-role` | `{AvailableRoles}` |
-| `operator-plan-step` | `{AvailableRoles}`, `{StepIndex}` |
-| `operator-compose-prompt` | `{StepTitle}`, `{StepDescription}`, `{PriorStepResults}`, `{AgentRole}` |
-| `operator-evaluate-result` | `{WorkerResult}`, `{AgentRole}` |
-| `operator-summarize-step` | `{WorkerResult}`, `{AgentRole}`, `{StepIndex}` |
-| `operator-summarize-task` | `{AllStepResults}` |
-
-### Scheduler Template Variables
-
-Scheduler skills receive these variables, substituted before the prompt is sent to the LLM:
-
-| Variable | Content |
-|----------|---------||
-| `{LastRunAt}` | ISO 8601 timestamp of the trigger's previous execution, or `"never"` on first run |
-| `{Now}` | Current execution timestamp (ISO 8601) |
-| `{TriggerName}` | Display name of the trigger |
-| `{AgentName}` | Name of the agent running this trigger |
-| `{ProjectName}` | Linked project name (empty if none) |
+| `{AgentName}` | Name of the executing agent |
 | `{ProjectId}` | Linked project ID (empty if none) |
+| `{TaskId}` | Task ID (empty if not in task context) |
+| `{WorkspacePath}` | Workspace root path for file/shell/git operations |
+
+#### Caller-provided parameters
+
+| Variable | Set by | Content |
+|----------|--------|---------|
+| `{Now}` | All worker paths, MCP | Current timestamp (ISO 8601) |
+| `{ProjectName}` | All worker paths | Linked project name (empty if none) |
+| `{AvailableWorkers}` | All worker paths | Markdown list of available worker agents with descriptions |
+| `{LastRunAt}` | Scheduler | Previous execution timestamp, or `"never"` on first run |
+| `{TriggerName}` | Scheduler | Display name of the trigger |
+| `{TaskName}` | TaskWakeup | Task name |
+
+#### Resolution scope by execution path
+
+| Path | Resolves on | Context source |
+|------|-------------|----------------|
+| CLI worker (`CliWorker`) | System prompt, personality, skill/step prompt | Full `PromptContext` from caller |
+| SK worker (`InternalWorker`) | System prompt, personality, user prompt | Full `PromptContext` from caller |
+| MCP `read_skill` | Skill content returned to agent | Active session context (resolved from the calling agent's session) |
+| SK `SkillsPlugin.read_skill` | Skill content returned to agent | `PromptContext` injected into plugin |
+
+Unknown placeholders are left as-is — they won't cause errors.
 
 Use `{LastRunAt}` to scope tool calls to only process data since the last run,
 avoiding duplicate work across executions.
@@ -151,9 +150,9 @@ avoiding duplicate work across executions.
 
 ## Role Determination
 
-The `operator-determine-role` skill runs at each step and selects which agent
-should handle it. The operator LLM receives the task context and the list of
-available agent roles, then returns the best-fit role.
+The manager determines at each step which agent should handle it.
+The manager LLM receives the task context and the list of available agent roles,
+then returns the best-fit role.
 
 If the LLM returns an unknown role or is uncertain, the task is blocked for manual review.
 
@@ -172,5 +171,4 @@ Config is re-synced from disk every 5 minutes — no restart required.
 ## Adding a Custom Skill
 
 1. Create `config/skills/my-skill.md`
-2. Reference it in `system-config/system.json` if it replaces a built-in operator skill,
-   or assign it to a scheduled trigger in `config/triggers/`.
+2. Assign it to a scheduled trigger in `config/triggers/`.

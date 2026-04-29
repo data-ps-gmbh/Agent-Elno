@@ -66,6 +66,76 @@ this includes Ollama, LiteLLM, vLLM, LocalAI, and similar.
 
 ---
 
+## Anthropic API
+
+The legal-on-server route to Claude — calls go to `api.anthropic.com` over HTTPS using the API key.
+Use this on any shared / production host.
+
+```json
+{
+  "name": "Anthropic",
+  "description": "Anthropic Claude API",
+  "type": "Anthropic",
+  "baseUrl": "https://api.anthropic.com",
+  "apiKey": "sk-ant-...",
+  "isActive": true,
+  "supportedModels": ["claude-opus-4-7", "claude-sonnet-4-6", "claude-haiku-4-5"]
+}
+```
+
+---
+
+## Claude Code CLI
+
+The Claude Code CLI route lets the platform invoke Claude **without an API key** by spawning the
+local `claude` binary, piggybacking on its own login (typically a Claude paid subscription).
+
+> **⚠️ Personal-machine only.** Per Anthropic's Terms of Service, the subscription-tied
+> `claude` CLI login is permitted on **your own developer machine** — not on a shared or
+> production server. For server installs, use the **Anthropic API** server type above instead.
+> The CLI route is intended for users who run Agent-Elno locally on the same workstation
+> they already use Claude Code on.
+
+The default config ships a disabled placeholder at `config/servers/claude-cli.json` — fill it
+in and flip `isActive` to `true` once the prerequisites below are met.
+
+### Prerequisites on the host
+
+1. Install Claude Code on the same machine where the API runs and ensure it is on `PATH`
+   (`which claude` should resolve).
+2. Log in once **as the user the API runs as** (the `agent-elno` system user on a default Linux
+   install): `sudo -u agent-elno claude login` — this writes the auth token into that user's
+   `~/.claude/` folder, which is what `ClaudeCliProvider` will use.
+3. Verify with a smoke test: `sudo -u agent-elno claude -p "ping"` should print a model response.
+
+### Server config
+
+```json
+{
+  "name": "Claude CLI",
+  "description": "Local Claude Code CLI",
+  "type": "ClaudeCli",
+  "baseUrl": "",
+  "apiKey": "",
+  "isActive": true,
+  "supportedModels": ["claude-opus-4-7", "claude-sonnet-4-6"]
+}
+```
+
+`baseUrl` and `apiKey` are intentionally empty — the CLI handles auth itself. `supportedModels`
+lists the versioned model IDs you want to route through this server; agents that target one of
+those IDs will be dispatched to `ClaudeCliProvider` automatically.
+
+### How task workers call back into the platform
+
+When a CLI worker runs a task, the API spawns `claude -p <prompt> --mcp-config <tempfile>` with
+an MCP config that points the spawned process at the API's **internal** MCP endpoint
+(`/mcp/agent`, JWT-protected, embedded in `DataPS.AI.Api`). This is a different MCP server than
+the standalone `DataPS.AI.MCP` service on port 5300 (which is for VS Code). No extra setup — the
+API generates the per-agent JWT and writes the temp config on the fly.
+
+---
+
 ## Nginx (Reverse Proxy + SSL)
 
 Agent-Elno requires WebSocket support for SignalR (chat streaming and task updates).

@@ -7,7 +7,7 @@ the **Trigger Log** (scheduler execution history), and **file-based system logs*
 
 ## Action Log
 
-The action log records every LLM call made by the system — from the operator,
+The action log records every LLM call made by the system — from the manager,
 the personal agent chat, and the scheduler. It is the primary place to look
 when something produces an unexpected result or fails silently.
 
@@ -33,7 +33,7 @@ Click any row to open the **detail view**, which shows:
 | Field | Description |
 |-------|-------------|
 | `Timestamp` | When the LLM call was made |
-| `Source` | Who initiated the call: `Operator`, `Assistant`, `Scheduler` |
+| `Source` | Who initiated the call: `Worker` (manager heartbeat, scheduled triggers, task wakeups), `Assistant` (chat), or `LlmChat` (raw `/llm/chat` API calls) |
 | `Action` | What was being done (e.g., `PlanStep`, `EvaluateResult`, `Chat`) |
 | `ContextType` | `Task`, `ChatSession`, or `Trigger` |
 | `ContextId` | ID of the task / session / trigger that triggered the call |
@@ -144,7 +144,7 @@ systemctl status dataps-ai-api dataps-ai-app dataps-ai-mcp
 |---------|-----------------|
 | Service won't start | Check the latest log file for startup exceptions |
 | Service keeps restarting | `grep -i "error\|exception"` across recent log files |
-| Operator not picking tasks | `tail -f` the API log — watch for worker tick messages |
+| Manager not picking tasks | First check that the `manager-heartbeat` trigger is **enabled** and pointing at the right project — the manager fires on a cron schedule, not a poll loop. Then `tail -f` the API log to confirm the heartbeat is firing. |
 | Config not loading | Look for `ConfigSync` warning lines |
 | Database error | Look for `SQLite`, `EF Core`, or `migration` in error lines |
 
